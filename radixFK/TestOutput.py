@@ -125,6 +125,8 @@ def load_two_tables(input_path, data_length):
 def perform_dataframe_join(table0_df, table1_df):
     """
     Perform inner join on key column
+
+    Assumes table0_df is the primary key table
     """
     # Perform inner join on 'key' column
     join_result = pd.merge(table0_df, table1_df, on='key', suffixes=('_R', '_S'))

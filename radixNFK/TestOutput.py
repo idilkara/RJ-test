@@ -126,8 +126,16 @@ def perform_dataframe_join(table0_df, table1_df):
     """
     Perform inner join on key column
     """
-    # Perform inner join on 'key' column
-    join_result = pd.merge(table0_df, table1_df, on='key', suffixes=('_R', '_S'))
+    # Determine which table is larger
+    if len(table0_df) > len(table1_df):
+        df_S = table0_df
+        df_R = table1_df
+    else:
+        df_S = table1_df
+        df_R = table0_df
+
+    # Perform inner join with smaller table on the left (R), larger on the right (S)
+    join_result = pd.merge(df_R, df_S, on='key', suffixes=('_R', '_S'))
     
     # Rename columns to match C/C++ oblivious join output format
     join_result = join_result.rename(columns={
