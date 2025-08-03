@@ -52,7 +52,7 @@ This builds the `OblRadix` executable that can be run with the following command
 
 ## Testing and Validation
 
-Our radix partitioning-based implementations include Python output validation scripts that compare the C++ implementation results against a reference pandas implementation to ensure correctness:
+Our radix partitioning-based implementations include Python output validation scripts that compare the C/C++ implementation results against a reference pandas implementation to ensure correctness:
 
 ```bash
 # Validate results using Python script
@@ -61,4 +61,42 @@ cd radixNFK  # or radixFK
 # ./OblRadix <num_threads> <input_file>
 # Then validate the results:
 python3 TestOutput.py <input_file> [join_output_file (build/join.txt by default)]
+```
+
+## Datasets
+
+The repository includes several datasets for evaluation:
+
+### Available Datasets
+
+- **`datasets/real/`** - 6 real-world datasets (NFK: 5, FK: 1)
+
+- **`datasets/TPC-H/`** - Scripts to generate TPC-H based join workloads
+
+- **`datasets/create_synthetic_data.py`** - Script to generate synthetic datasets
+
+### Input Format Requirements
+
+All implementations expect input files with this format:
+```
+n0 n1
+
+key1 payload1
+key2 payload2
+...
+(n0 records for table 0)
+
+key1 payload1
+key2 payload2
+...
+(n1 records for table 1)
+```
+
+### Evaluating pre-sorted datasets
+
+Both radix-paritioning based implementations include a `sort_tables.py` script to pre-sort datasets (if not already sorted):
+
+```bash
+cd radixNFK  # or radixFK
+python3 sort_tables.py <input_file> <output_file>
 ```
