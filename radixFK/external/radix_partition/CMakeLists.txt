@@ -17,8 +17,8 @@ target_include_directories(radix_partition PUBLIC
 # Set radix fan-out
 target_compile_definitions(radix_partition
     PRIVATE
-        NUM_RADIX_BITS=10
-        NUM_PASSES=2
+        NUM_RADIX_BITS=6
+        NUM_PASSES=1
 )
 
 target_compile_options(radix_partition PRIVATE

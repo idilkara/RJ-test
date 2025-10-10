@@ -5,6 +5,7 @@
 #include "prj_params.h"
 #include "task_queue.h"
 #include "util.h"
+#include <stdio.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -264,11 +265,11 @@ static void parallel_radix_partition(part_t *const part) {
   const uint32_t MASK = (fanOut - 1) << R;
   const uint32_t padding = part->padding;
 
-  // if (my_tid == 0) {
-  //   printf("Radix partitioning. R=%d, D=%d, fanout=%d, MASK=%d\n", R, D,
-  //   fanOut,
-  //          MASK);
-  // }
+  if (my_tid == 0) {
+    printf("Radix partitioning. R=%d, D=%d, fanout=%d, MASK=%d\n", R, D,
+    fanOut,
+           MASK);
+  }
 
   int32_t sum = 0;
   uint32_t i, j;
@@ -339,11 +340,11 @@ static void *prj_thread(void *param) {
   const int thresh1 = (const int)(MAX((1 << D), (1 << R)) *
                                   THRESHOLD1((unsigned long)args->nthreads));
 
-  // if (args->my_tid == 0) {
-  //   printf("NUM_PASSES=%d, RADIX_BITS=%d\n", NUM_PASSES, NUM_RADIX_BITS);
-  //   printf("fanOut = %d, R = %d, D = %d, thresh1 = %d\n", fanOut, R, D,
-  //          thresh1);
-  // }
+  if (args->my_tid == 0) {
+    printf("NUM_PASSES=%d, RADIX_BITS=%d\n", NUM_PASSES, NUM_RADIX_BITS);
+    printf("fanOut = %d, R = %d, D = %d, thresh1 = %d\n", fanOut, R, D,
+           thresh1);
+  }
   uint64_t results = 0;
   int i;
   int rv = 0;
@@ -408,6 +409,9 @@ static void *prj_thread(void *param) {
     for (i = 0; i < fanOut; i++) {
       int32_t ntupR = outputR[i + 1] - outputR[i] - (int32_t)PADDING_TUPLES;
       int32_t ntupS = outputS[i + 1] - outputS[i] - (int32_t)PADDING_TUPLES;
+
+      /* Print per-partition counts for R and S */
+      printf("Partition %d: R=%d S=%d\n", i, ntupR, ntupS);
 
       if (ntupR > 0 && ntupS > 0) {
         task_t *t = task_queue_get_slot(part_queue);

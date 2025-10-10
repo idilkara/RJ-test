@@ -23,10 +23,11 @@ extern "C" {
 #include "threading.h"
 }
 
-// #define PRE_SORTED // use this if your tables are already sorted
+#define PRE_SORTED // use this if your tables are already sorted
 
 // Global timer
 std::chrono::high_resolution_clock::time_point tStart;
+std::chrono::high_resolution_clock::time_point tEnd;
 
 int main(int argc, char *argv[]) {
   printf("Set number of radix bits and passes for your workload in "
@@ -55,6 +56,8 @@ int main(int argc, char *argv[]) {
   R.tuples = new row_t[t0.size()];
   std::memcpy(R.tuples, t0.data(), t0.size() * sizeof(Record));
   R.num_tuples = static_cast<uint32_t>(t0.size());
+
+
   for (int i = 0; i < R.num_tuples; i++) {
     R.tuples[i].cntSelf = 1;
   }
@@ -79,24 +82,70 @@ int main(int argc, char *argv[]) {
   total_num_threads = numThreads;
   thread_system_init();
 
-  std::vector<std::thread> pool;
+  // Bitonic sort S
+  std::vector<std::thread> pool; // thread pool
   for (size_t i = 1; i < numThreads; ++i)
     pool.emplace_back(thread_start_work);
 
   tStart = std::chrono::high_resolution_clock::now();
+
+  std::chrono::high_resolution_clock::time_point t1Start, t1End;
+  t1Start = std::chrono::high_resolution_clock::now();
+
   bitonic_sort_(S.tuples, true, 0, S.num_tuples, numThreads, false);
+  t1End = std::chrono::high_resolution_clock::now();
+  double t1Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t1End - t1Start)
+          .count();
+  printf("Bitonic sort S completed in %f s\n", t1Sec);
 
   thread_release_all();
   for (auto &t : pool)
     t.join();
   thread_system_cleanup();
-#else
+
+#else //NO SORTING
   tStart = std::chrono::high_resolution_clock::now();
 #endif
 
+  std::chrono::high_resolution_clock::time_point t2Start, t2End;
+  t2Start = std::chrono::high_resolution_clock::now();
+
   parallelCounts(S, slices_S_numThreads, lastLen, mergeVal);
+
+  t2End = std::chrono::high_resolution_clock::now();
+  double t2Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t2End - t2Start)
+          .count();
+  printf("Parallel counts completed in %f s\n", t2Sec);
+
+
+  std::chrono::high_resolution_clock::time_point t3Start, t3End;
+  t3Start = std::chrono::high_resolution_clock::now();
+
   generateHashParallel(R, slices_R_numThreads);
+
+  t3End = std::chrono::high_resolution_clock::now();
+  double t3Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t3End - t3Start)
+          .count();
+  printf("Hash generation completed in %f s\n", t3Sec);
+
+
+
+  std::chrono::high_resolution_clock::time_point t4Start, t4End;
+  t4Start = std::chrono::high_resolution_clock::now();
+
   replaceWithDummiesParallel(S, slices_S_numThreads);
+
+  t4End = std::chrono::high_resolution_clock::now();
+  double t4Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t4End - t4Start)
+          .count();
+  printf("Replace with dummies completed in %f s\n", t4Sec);
+
+  std::chrono::high_resolution_clock::time_point t5Start, t5End;
+  t5Start = std::chrono::high_resolution_clock::now();
 
   if (S.num_tuples >= R.num_tuples) {
     RHO(&R, &S, numThreads, false);
@@ -104,28 +153,87 @@ int main(int argc, char *argv[]) {
     RHO(&S, &R, numThreads, true);
   }
 
+  t5End = std::chrono::high_resolution_clock::now();
+  double t5Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t5End - t5Start)
+          .count();
+  printf("Radix join counts completed in %f s\n", t5Sec);
+
+  std::chrono::high_resolution_clock::time_point t6Start, t6End;
+  t6Start = std::chrono::high_resolution_clock::now();
   backfillDummiesParallel(S, slices_S_numThreads);
+  t6End = std::chrono::high_resolution_clock::now();
+  double t6Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t6End - t6Start)
+          .count();
+  printf("Backfill dummies completed in %f s\n", t6Sec);
+
+
+  std::chrono::high_resolution_clock::time_point t7Start, t7End;
+  t7Start = std::chrono::high_resolution_clock::now(); 
+
   std::uint32_t m = prefixSumExpandParallel(S, slices_S_numThreads);
+  t7End = std::chrono::high_resolution_clock::now();
+  double t7Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t7End - t7Start)
+          .count();
+  printf("Prefix sum and expand completed in %f s\n", t7Sec);
+
+  std::chrono::high_resolution_clock::time_point t8Start, t8End;
+  t8Start = std::chrono::high_resolution_clock::now();
   std::vector<Slice> slices_m = buildSlices(m, numThreads);
+  t8End = std::chrono::high_resolution_clock::now();
+  double t8Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t8End - t8Start)
+          .count();
+  printf("Build slices for m completed in %f s\n", t8Sec);
+
   const std::size_t bytes = m * sizeof(row_t);
   table_t idxTable{};
   idxTable.tuples = static_cast<row_t *>(aligned_alloc(32, bytes));
   idxTable.num_tuples = m;
+
+  std::chrono::high_resolution_clock::time_point t9Start, t9End;
+  t9Start = std::chrono::high_resolution_clock::now();  
   buildResultIndices(slices_m, idxTable);
+  t9End = std::chrono::high_resolution_clock::now();
+  double t9Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t9End - t9Start)
+          .count();
+  printf("Build result indices completed in %f s\n", t9Sec);
 
   table_t expanded{};
   expanded.tuples = static_cast<row_t *>(aligned_alloc(32, bytes));
   std::memset(expanded.tuples, 0, bytes);
   expanded.num_tuples = m;
 
+  std::chrono::high_resolution_clock::time_point t10Start, t10End;
+  t10Start = std::chrono::high_resolution_clock::now();  
+ 
   if (m >= S.num_tuples) {
     RHO_idx(&S, &idxTable, numThreads, &expanded, true);
   } else {
     RHO_idx(&idxTable, &S, numThreads, &expanded, false);
   }
 
-  carryForwardParallel(expanded, slices_m);
+  t10End = std::chrono::high_resolution_clock::now();
+  double t10Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t10End - t10Start)
+          .count();
+  printf("Radix join indices completed in %f s\n", t10Sec);
 
+
+  std::chrono::high_resolution_clock::time_point t11Start, t11End;
+  t11Start = std::chrono::high_resolution_clock::now();
+
+  carryForwardParallel(expanded, slices_m);
+  t11End = std::chrono::high_resolution_clock::now();
+  double t11Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t11End - t11Start)
+          .count();
+  printf("Carry forward completed in %f s\n", t11Sec);
+
+  
   {
     std::ofstream outER("join.txt");
     for (int i = 0; i < expanded.num_tuples; i++) {
