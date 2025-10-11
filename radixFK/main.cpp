@@ -23,7 +23,7 @@ extern "C" {
 #include "threading.h"
 }
 
-#define PRE_SORTED // use this if your tables are already sorted
+//#define PRE_SORTED // use this if your tables are already sorted
 
 // Global timer
 std::chrono::high_resolution_clock::time_point tStart;
@@ -92,12 +92,12 @@ int main(int argc, char *argv[]) {
   std::chrono::high_resolution_clock::time_point t1Start, t1End;
   t1Start = std::chrono::high_resolution_clock::now();
 
-  bitonic_sort_(S.tuples, true, 0, S.num_tuples, numThreads, false);
+  bitonic_sort_(R.tuples, true, 0, R.num_tuples, numThreads, false);
   t1End = std::chrono::high_resolution_clock::now();
   double t1Sec =
       std::chrono::duration_cast<std::chrono::duration<double>>(t1End - t1Start)
           .count();
-  printf("Bitonic sort S completed in %f s\n", t1Sec);
+  printf("Bitonic sort R completed in %f s\n", t1Sec);
 
   thread_release_all();
   for (auto &t : pool)

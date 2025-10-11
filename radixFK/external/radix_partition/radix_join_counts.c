@@ -14,7 +14,7 @@
 
 #define HASH_BIT_MODULO(K, MASK, NBITS) (((K) & MASK) >> NBITS)
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-
+//*** */
 // inspired from "bit twiddling hacks":
 // http://graphics.stanford.edu/~seander/bithacks.html
 #define PREV_POW_2(V)                                                          \
@@ -102,7 +102,7 @@ int64_t bucket_chaining_join(const struct table_t *const R,
   int *next, *bucket;
   const uint64_t numR = R->num_tuples;
   const uint64_t numS = S->num_tuples;
-
+//*** */ setting nof buckets
   uint32_t N = ceil(numS * 0.08);
   PREV_POW_2(N);
   const uint32_t MASK = (N - 1) << (NUM_RADIX_BITS);
