@@ -1,5 +1,3 @@
-
-
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -11,23 +9,25 @@
 
 int main() {
     const uint64_t data_max = (1ULL << 31);   // 2^31
-    const std::vector<uint64_t> ratios = {1000, 1000000}; //1000 and 1Million
-    uint64_t n_big = 400000000; // 400 Million
+    const std::vector<uint64_t> ratios = {100, 10}; //1000 and 1Million
+    uint64_t n_big = 4000; // 400 Million
 
-            // --- Generate unique values for the big table ---
-        std::mt19937_64 gen_big(42);
-        std::uniform_int_distribution<uint64_t> dist_big(1, data_max - 1);
+    // --- Generate unique values for the big table ---
+    std::mt19937_64 gen_big(42);
+    std::uniform_int_distribution<uint64_t> dist_big(1, data_max - 1);
 
-        std::unordered_set<uint64_t> unique_values;
-        unique_values.reserve(n_big * 1.2);
+    std::unordered_set<uint64_t> unique_values;
+    unique_values.reserve(n_big * 1.2);
 
-        while (unique_values.size() < n_big) {
-            unique_values.insert(dist_big(gen_big));
-        }
+    while (unique_values.size() < n_big) {
+        unique_values.insert(dist_big(gen_big));
+    }
 
-        std::vector<uint64_t> values_big(unique_values.begin(), unique_values.end());
+    std::vector<uint64_t> values_big(unique_values.begin(), unique_values.end());
 
-        
+    // ✅ Sort the big table before writing
+    std::sort(values_big.begin(), values_big.end());
+
     for (auto ratio : ratios) {
         uint64_t n_small = ratio;
 
@@ -50,7 +50,7 @@ int main() {
 
         file << n_big << " " << n_small << "\n\n";
 
-        // Table S (unique)
+        // Table S (unique and sorted)
         for (auto val : values_big)
             file << val << " " << val << "\n";
 
@@ -63,7 +63,7 @@ int main() {
         file.close();
 
         std::cout << "Generated " << name << ": S=" << n_big
-                  << " (unique), R=" << n_small << " (sampled from S)\n";
+                  << " (unique, sorted), R=" << n_small << " (sampled from S)\n";
     }
 
     return 0;
