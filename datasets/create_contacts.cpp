@@ -13,10 +13,8 @@ int main() {
     const uint64_t data_max = (1ULL << 31);   // 2^31
     const std::vector<uint64_t> ratios = {1000, 1000000}; //1000 and 1Million
     uint64_t n_big = 400000000; // 400 Million
-    for (auto ratio : ratios) {
-        uint64_t n_small = ratio;
 
-        // --- Generate unique values for the big table ---
+            // --- Generate unique values for the big table ---
         std::mt19937_64 gen_big(42);
         std::uniform_int_distribution<uint64_t> dist_big(1, data_max - 1);
 
@@ -28,6 +26,10 @@ int main() {
         }
 
         std::vector<uint64_t> values_big(unique_values.begin(), unique_values.end());
+
+        
+    for (auto ratio : ratios) {
+        uint64_t n_small = ratio;
 
         // --- Generate small table sampled from big table ---
         std::mt19937_64 gen_small(123);
