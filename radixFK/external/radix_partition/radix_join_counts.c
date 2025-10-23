@@ -5,7 +5,6 @@
 #include "prj_params.h"
 #include "task_queue.h"
 #include "util.h"
-#include <stdio.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -14,7 +13,7 @@
 
 #define HASH_BIT_MODULO(K, MASK, NBITS) (((K) & MASK) >> NBITS)
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
-//*** */
+
 // inspired from "bit twiddling hacks":
 // http://graphics.stanford.edu/~seander/bithacks.html
 #define PREV_POW_2(V)                                                          \
@@ -46,6 +45,7 @@ struct arg_t_radix {
   struct row_t *tmpS2;
 
   bool isSPrimary;
+  int bins;
 
   uint64_t numR;
   uint64_t numS;
@@ -95,20 +95,16 @@ static void *alloc_aligned(size_t size) {
 int64_t bucket_chaining_join(const struct table_t *const R,
                              const struct table_t *const S,
                              struct table_t *const tmpR, output_list_t **output,
-                             bool isSPrimary) {
+                             bool isSPrimary, int bins) {
   (void)(tmpR);
   (void)(output);
 
   int *next, *bucket;
   const uint64_t numR = R->num_tuples;
   const uint64_t numS = S->num_tuples;
-//*** */ setting nof buckets
-  uint32_t N = ceil(numS * 0.08);
-  PREV_POW_2(N);
-  const uint32_t MASK = (N - 1) << (NUM_RADIX_BITS);
-
+  const uint32_t MASK = (bins - 1) << (NUM_RADIX_BITS);
   next = (int *)malloc(sizeof(int) * numR);
-  bucket = (int *)calloc(N, sizeof(int));
+  bucket = (int *)calloc(bins, sizeof(int));
 
   struct row_t *Rtuples = R->tuples;
   for (uint32_t i = 0; i < numR;) {
@@ -265,11 +261,11 @@ static void parallel_radix_partition(part_t *const part) {
   const uint32_t MASK = (fanOut - 1) << R;
   const uint32_t padding = part->padding;
 
-  if (my_tid == 0) {
-    printf("Radix partitioning. R=%d, D=%d, fanout=%d, MASK=%d\n", R, D,
-    fanOut,
-           MASK);
-  }
+  // if (my_tid == 0) {
+  //   printf("Radix partitioning. R=%d, D=%d, fanout=%d, MASK=%d\n", R, D,
+  //   fanOut,
+  //          MASK);
+  // }
 
   int32_t sum = 0;
   uint32_t i, j;
@@ -340,11 +336,11 @@ static void *prj_thread(void *param) {
   const int thresh1 = (const int)(MAX((1 << D), (1 << R)) *
                                   THRESHOLD1((unsigned long)args->nthreads));
 
-  if (args->my_tid == 0) {
-    printf("NUM_PASSES=%d, RADIX_BITS=%d\n", NUM_PASSES, NUM_RADIX_BITS);
-    printf("fanOut = %d, R = %d, D = %d, thresh1 = %d\n", fanOut, R, D,
-           thresh1);
-  }
+  // if (args->my_tid == 0) {
+  //   printf("NUM_PASSES=%d, RADIX_BITS=%d\n", NUM_PASSES, NUM_RADIX_BITS);
+  //   printf("fanOut = %d, R = %d, D = %d, thresh1 = %d\n", fanOut, R, D,
+  //          thresh1);
+  // }
   uint64_t results = 0;
   int i;
   int rv = 0;
@@ -410,9 +406,6 @@ static void *prj_thread(void *param) {
       int32_t ntupR = outputR[i + 1] - outputR[i] - (int32_t)PADDING_TUPLES;
       int32_t ntupS = outputS[i + 1] - outputS[i] - (int32_t)PADDING_TUPLES;
 
-      /* Print per-partition counts for R and S */
-      printf("Partition %d: R=%d S=%d\n", i, ntupR, ntupS);
-
       if (ntupR > 0 && ntupS > 0) {
         task_t *t = task_queue_get_slot(part_queue);
 
@@ -471,7 +464,7 @@ static void *prj_thread(void *param) {
     //    i.e. bucket chaining, histogram-based, histogram-based with simd &
     //    prefetching  */
     results += args->join_function(&task->relR, &task->relS, &task->tmpR,
-                                   &output, args->isSPrimary);
+                                   &output, args->isSPrimary, args->bins);
 
     /* Propagate changes back to original data using idx mapping */
     for (uint32_t i = 0; i < task->relR.num_tuples; i++) {
@@ -518,7 +511,8 @@ static void *prj_thread(void *param) {
  * histogram_optimized_join()
  */
 static result_t *join_init_run(struct table_t *relR, struct table_t *relS,
-                               JoinFunction jf, int nthreads, bool isSPrimary) {
+                               JoinFunction jf, int nthreads, bool isSPrimary,
+                               int bins) {
   int i, rv;
   pthread_t tid[nthreads];
   pthread_barrier_t barrier;
@@ -583,6 +577,7 @@ static result_t *join_init_run(struct table_t *relR, struct table_t *relS,
     args[i].tmpS2 = tmpRelS2;
 
     args[i].isSPrimary = isSPrimary;
+    args[i].bins = bins;
 
     args[i].numR = (i == (nthreads - 1)) ? (relR->num_tuples - i * numperthr[0])
                                          : numperthr[0];
@@ -650,6 +645,7 @@ static result_t *join_init_run(struct table_t *relR, struct table_t *relS,
 }
 
 result_t *RHO(struct table_t *relR, struct table_t *relS, int nthreads,
-              bool isSPrimary) {
-  return join_init_run(relR, relS, bucket_chaining_join, nthreads, isSPrimary);
+              bool isSPrimary, int bins) {
+  return join_init_run(relR, relS, bucket_chaining_join, nthreads, isSPrimary,
+                       bins);
 }

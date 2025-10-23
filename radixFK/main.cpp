@@ -23,17 +23,52 @@ extern "C" {
 #include "threading.h"
 }
 
-//#define PRE_SORTED // use this if your tables are already sorted
+// #define PRE_SORTED // use this if your tables are already sorted
 
-// Global timer
-std::chrono::high_resolution_clock::time_point tStart;
-std::chrono::high_resolution_clock::time_point tEnd;
+// Global timers
+std::chrono::high_resolution_clock::time_point tStart, tEnd;
+
+// inspired from "bit twiddling hacks":
+// http://graphics.stanford.edu/~seander/bithacks.html
+inline uint32_t prevPow2(uint32_t v) {
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  return v - (v >> 1);
+}
+
+/**
+ * Find the maximum number of bins that achieves a target probability
+ * Lemma 1: m * exp(-n/m) ≈ target_p
+ */
+inline std::pair<std::uint32_t, double>
+findMaxBins(double n, double target_p = 0.001, double eps = 1e-6) {
+  int i;
+  double low = 1, high = n, m = 0, p = 0;
+  for (i = 0; i < 100; ++i) {
+    m = (low + high) / 2.0;
+    p = m * std::exp(-n / m);
+    if (std::fabs(p - target_p) < eps)
+      break;
+    (p > target_p) ? (high = m) : (low = m);
+  }
+
+  if (i == 100) {
+    std::cerr << "Lemma 1 unsatisfied. Reconfigure radix parameters."
+              << std::endl;
+  }
+
+  return {prevPow2(static_cast<std::uint32_t>(std::ceil(m))), p};
+}
 
 int main(int argc, char *argv[]) {
-  printf("Set number of radix bits and passes for your workload in "
-         "external/radix_partition/CMakeLists.txt.\n");
+  printf("[INFO] Set number of radix bits and passes in the top-level "
+         "CMakeLists.txt.\n");
+  printf("[INFO] R: Primary Key table; S: Foreign Key table\n");
   std::uint32_t numThreads = 32;
-  std::string inputPath = "../amazon.txt";
+  std::string inputPath = "../../datasets/real/imdb/imdb.txt";
 
   if (argc > 1)
     numThreads = std::max<std::uint32_t>(1, std::stoul(argv[1]));
@@ -45,8 +80,8 @@ int main(int argc, char *argv[]) {
               << std::endl;
     return 1;
   }
-  printf("Input   : %s\n", inputPath.c_str());
-  printf("Threads : %u\n", numThreads);
+  printf("Input: %s\n", inputPath.c_str());
+  printf("Threads: %u\n", numThreads);
 
   std::vector<Record> t0, t1;
   if (!load_two_tables(inputPath, t0, t1))
@@ -56,8 +91,6 @@ int main(int argc, char *argv[]) {
   R.tuples = new row_t[t0.size()];
   std::memcpy(R.tuples, t0.data(), t0.size() * sizeof(Record));
   R.num_tuples = static_cast<uint32_t>(t0.size());
-
-
   for (int i = 0; i < R.num_tuples; i++) {
     R.tuples[i].cntSelf = 1;
   }
@@ -77,13 +110,23 @@ int main(int argc, char *argv[]) {
   std::vector<int> lastLen(slices_S_numThreads.size()),
       mergeVal(slices_S_numThreads.size() - 1);
 
+  printf("\nRadix bits: %u, Passes: %u\n", NUM_RADIX_BITS, NUM_PASSES);
+  std::uint32_t bins;
+
+  double p;
+  if (R.num_tuples <= S.num_tuples) {
+    std::tie(bins, p) = findMaxBins(R.num_tuples / std::pow(2, NUM_RADIX_BITS));
+  } else {
+    std::tie(bins, p) = findMaxBins(S.num_tuples / std::pow(2, NUM_RADIX_BITS));
+  }
+  printf("(EXCHANGE)   Bins: %u, Lemma 1 p: %.4f\n", bins, p);
+
 #ifndef PRE_SORTED
   extern size_t total_num_threads;
   total_num_threads = numThreads;
   thread_system_init();
 
-  // Bitonic sort S
-  std::vector<std::thread> pool; // thread pool
+  std::vector<std::thread> pool;
   for (size_t i = 1; i < numThreads; ++i)
     pool.emplace_back(thread_start_work);
 
@@ -92,7 +135,7 @@ int main(int argc, char *argv[]) {
   std::chrono::high_resolution_clock::time_point t1Start, t1End;
   t1Start = std::chrono::high_resolution_clock::now();
 
-  bitonic_sort_(R.tuples, true, 0, R.num_tuples, numThreads, false);
+  bitonic_sort_(S.tuples, true, 0, S.num_tuples, numThreads, false);
   t1End = std::chrono::high_resolution_clock::now();
   double t1Sec =
       std::chrono::duration_cast<std::chrono::duration<double>>(t1End - t1Start)
@@ -103,8 +146,7 @@ int main(int argc, char *argv[]) {
   for (auto &t : pool)
     t.join();
   thread_system_cleanup();
-
-#else //NO SORTING
+#else
   tStart = std::chrono::high_resolution_clock::now();
 #endif
 
@@ -124,116 +166,76 @@ int main(int argc, char *argv[]) {
   t3Start = std::chrono::high_resolution_clock::now();
 
   generateHashParallel(R, slices_R_numThreads);
+  replaceWithDummiesParallel(S, slices_S_numThreads);
+
+  if (S.num_tuples >= R.num_tuples) {
+    RHO(&R, &S, numThreads, false, bins);
+  } else {
+    RHO(&S, &R, numThreads, true, bins);
+  }
 
   t3End = std::chrono::high_resolution_clock::now();
   double t3Sec =
       std::chrono::duration_cast<std::chrono::duration<double>>(t3End - t3Start)
           .count();
-  printf("Hash generation completed in %f s\n", t3Sec);
+  printf("Radix join counts completed in %f s\n", t3Sec);
 
 
+    std::chrono::high_resolution_clock::time_point t4Start, t4End;
+    t4Start = std::chrono::high_resolution_clock::now();
+  backfillDummiesParallel(S, slices_S_numThreads);
+    t4End = std::chrono::high_resolution_clock::now();
+    double t4Sec =
+        std::chrono::duration_cast<std::chrono::duration<double>>(t4End - t4Start)
+            .count();
+    printf("Backfilling dummies completed in %f s\n", t4Sec);
 
-  std::chrono::high_resolution_clock::time_point t4Start, t4End;
-  t4Start = std::chrono::high_resolution_clock::now();
 
-  replaceWithDummiesParallel(S, slices_S_numThreads);
-
-  t4End = std::chrono::high_resolution_clock::now();
-  double t4Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t4End - t4Start)
-          .count();
-  printf("Replace with dummies completed in %f s\n", t4Sec);
-
-  std::chrono::high_resolution_clock::time_point t5Start, t5End;
+    std::chrono::high_resolution_clock::time_point t5Start, t5End;
   t5Start = std::chrono::high_resolution_clock::now();
-
-  if (S.num_tuples >= R.num_tuples) {
-    RHO(&R, &S, numThreads, false);
-  } else {
-    RHO(&S, &R, numThreads, true);
-  }
+  std::uint32_t m = prefixSumExpandParallel(S, slices_S_numThreads);
 
   t5End = std::chrono::high_resolution_clock::now();
   double t5Sec =
       std::chrono::duration_cast<std::chrono::duration<double>>(t5End - t5Start)
           .count();
-  printf("Radix join counts completed in %f s\n", t5Sec);
+  printf("Prefix sum expand completed in %f s\n", t5Sec);
 
-  std::chrono::high_resolution_clock::time_point t6Start, t6End;
-  t6Start = std::chrono::high_resolution_clock::now();
-  backfillDummiesParallel(S, slices_S_numThreads);
-  t6End = std::chrono::high_resolution_clock::now();
-  double t6Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t6End - t6Start)
-          .count();
-  printf("Backfill dummies completed in %f s\n", t6Sec);
+  
 
-
-  std::chrono::high_resolution_clock::time_point t7Start, t7End;
-  t7Start = std::chrono::high_resolution_clock::now(); 
-
-  std::uint32_t m = prefixSumExpandParallel(S, slices_S_numThreads);
-  t7End = std::chrono::high_resolution_clock::now();
-  double t7Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t7End - t7Start)
-          .count();
-  printf("Prefix sum and expand completed in %f s\n", t7Sec);
-
-  std::chrono::high_resolution_clock::time_point t8Start, t8End;
-  t8Start = std::chrono::high_resolution_clock::now();
   std::vector<Slice> slices_m = buildSlices(m, numThreads);
-  t8End = std::chrono::high_resolution_clock::now();
-  double t8Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t8End - t8Start)
-          .count();
-  printf("Build slices for m completed in %f s\n", t8Sec);
-
   const std::size_t bytes = m * sizeof(row_t);
   table_t idxTable{};
   idxTable.tuples = static_cast<row_t *>(aligned_alloc(32, bytes));
   idxTable.num_tuples = m;
 
-  std::chrono::high_resolution_clock::time_point t9Start, t9End;
-  t9Start = std::chrono::high_resolution_clock::now();  
+
+  std::chrono::high_resolution_clock::time_point t6Start, t6End;
+  t6Start = std::chrono::high_resolution_clock::now();
   buildResultIndices(slices_m, idxTable);
-  t9End = std::chrono::high_resolution_clock::now();
-  double t9Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t9End - t9Start)
+  t6End = std::chrono::high_resolution_clock::now();
+  double t6Sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(t6End - t6Start)
           .count();
-  printf("Build result indices completed in %f s\n", t9Sec);
+  printf("Building result indices completed in %f s\n", t6Sec);
+
 
   table_t expanded{};
   expanded.tuples = static_cast<row_t *>(aligned_alloc(32, bytes));
   std::memset(expanded.tuples, 0, bytes);
   expanded.num_tuples = m;
 
-  std::chrono::high_resolution_clock::time_point t10Start, t10End;
-  t10Start = std::chrono::high_resolution_clock::now();  
- 
-  if (m >= S.num_tuples) {
-    RHO_idx(&S, &idxTable, numThreads, &expanded, true);
-  } else {
-    RHO_idx(&idxTable, &S, numThreads, &expanded, false);
-  }
-
-  t10End = std::chrono::high_resolution_clock::now();
-  double t10Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t10End - t10Start)
-          .count();
-  printf("Radix join indices completed in %f s\n", t10Sec);
-
-
-  std::chrono::high_resolution_clock::time_point t11Start, t11End;
-  t11Start = std::chrono::high_resolution_clock::now();
-
-  carryForwardParallel(expanded, slices_m);
-  t11End = std::chrono::high_resolution_clock::now();
-  double t11Sec =
-      std::chrono::duration_cast<std::chrono::duration<double>>(t11End - t11Start)
-          .count();
-  printf("Carry forward completed in %f s\n", t11Sec);
+  std::tie(bins, p) = findMaxBins(m / std::pow(2, NUM_RADIX_BITS));
+  RHO_idx(&idxTable, &S, numThreads, &expanded, bins);
 
   
+  carryForwardParallel(expanded, slices_m);
+
+  printf("(DISTRIBUTE) Bins: %u, Lemma 1 p: %.4f\n", bins, p);
+  double sec =
+      std::chrono::duration_cast<std::chrono::duration<double>>(tEnd - tStart)
+          .count();
+  printf("\nJoin completed in %f s\n", sec);
   {
     std::ofstream outER("join.txt");
     for (int i = 0; i < expanded.num_tuples; i++) {
@@ -242,7 +244,7 @@ int main(int argc, char *argv[]) {
             << expanded.tuples[i].paySelf << '\n';
     }
   }
-  printf("Join result rows : %ld (written to join.txt)\n", expanded.num_tuples);
+  printf("Join result rows: %ld (written to join.txt)\n", expanded.num_tuples);
 
   return 0;
 }
